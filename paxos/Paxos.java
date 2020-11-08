@@ -22,7 +22,14 @@ public class Paxos implements PaxosRMI, Runnable{
     AtomicBoolean unreliable;// for testing
 
     // Your data here
+    Integer n_p; //highest prepare seen
+    String n_a;  //highest accept seen (key)
+    Integer v_a; //highest accept seen (value)
+    State s;
 
+    // to be read by created thread
+    int seq;
+    Object value; 
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -39,7 +46,10 @@ public class Paxos implements PaxosRMI, Runnable{
         this.unreliable = new AtomicBoolean(false);
 
         // Your initialization code here
-
+        this.n_p = -1;
+        this.n_a = "";
+        this.v_a = -1;
+        this.s = State.Pending;
 
         // register peers, do not modify this part
         try{
@@ -107,11 +117,23 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public void Start(int seq, Object value){
         // Your code here
+        this.seq = seq;
+        this.value = value;
+
+        // Runnable newRunnable = new Paxos();
+        Thread t = new Thread(this);
+        t.start();
     }
 
     @Override
     public void run(){
         //Your code here
+        while(this.s != State.Decided){
+            Integer n = n_p + 1;
+            for(String server : peers) {
+                Call("Prepare", )
+            }
+        }
     }
 
     // RMI handler
