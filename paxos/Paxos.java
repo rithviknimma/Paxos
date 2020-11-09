@@ -29,8 +29,6 @@ public class Paxos implements PaxosRMI, Runnable{
     int minSeq;
     int clock;
 
-    retStatus status;
-
     public class Metadata {
         Object value;
         retStatus status;
@@ -143,7 +141,6 @@ public class Paxos implements PaxosRMI, Runnable{
         if (seq >= Min()) {
             this.instances.put(seq, new Metadata(value));
             clq.add(seq);
-            this.status = new retStatus(State.Pending, value);
 
             // Runnable newRunnable = new Paxos();
             Thread t = new Thread(this);
@@ -159,13 +156,13 @@ public class Paxos implements PaxosRMI, Runnable{
         mutex.lock();
         try {
             proposal = this.clock + 1;
-            clock++;
+            this.clock++;
         } finally {
             mutex.unlock();
         }
         while (this.instances.get(seq).status.state != State.Decided) {
             Object value = this.instances.get(seq).value;
-            Request req = new Request(proposal, value, seq);
+            Request req = new Request(proposal, value, seq, this.clock);
             int count = 0;
             int max_proposal = proposal;
             Object max_value = value;
@@ -179,16 +176,19 @@ public class Paxos implements PaxosRMI, Runnable{
                 }
                 if (res != null) {
                     if (res.ok) {
-                        count++;        
+                        count++;
+                        if (res.n_a > max_proposal) {
+                            max_proposal = res.n_a;
+                            max_value = res.v_a;
+                        }
                     }
-                    if (res.n_a > max_proposal) {
-                        max_proposal = res.n_a;
-                        max_value = res.v_a;                    
+                    if (res.clk > this.clock) {
+                        this.clock = res.clk;
                     }
                 }
             }
             if (count > ports.length / 2) {
-                req = new Request(proposal, max_value, seq);
+                req = new Request(proposal, max_value, seq, this.clock);
                 count = 0;
                 for (int i = 0; i < peers.length; i++) {
                     Response res;
@@ -202,6 +202,9 @@ public class Paxos implements PaxosRMI, Runnable{
                         if (res.ok) {
                             count++;        
                         }
+                        if (res.clk > this.clock) {
+                            this.clock = res.clk;
+                        }
                     }
                 }
                 
@@ -214,6 +217,11 @@ public class Paxos implements PaxosRMI, Runnable{
                         else {
                             res = Decide(req);
                         }
+                        if (res != null) {
+                            if (res.clk > this.clock) {
+                                this.clock = res.clk;
+                            }
+                        }
                     }
                 }
             }
@@ -223,42 +231,53 @@ public class Paxos implements PaxosRMI, Runnable{
     // RMI handler
     public Response Prepare(Request req){
         // your code here
+        if (req.proposal > this.clock) {
+            this.clock = req.clk;
+        }
         Response r;
         Metadata m = this.instances.get(req.seq);
+        if (m == null) {
+            m = new Metadata(req.value);
+            this.instances.put(req.seq, m);
+        }
         if (req.proposal > m.n_p) {
             m.n_p = req.proposal;
-            this.instances.put(req.seq, m);
-            r = new Response(true, m.n_a, m.v_a);
+            r = new Response(true, m.n_a, m.v_a, this.clock);
         }
         else {
-            r = new Response(false, m.n_a, m.v_a);
+            r = new Response(false, m.n_a, m.v_a, this.clock);
         }
         return r;
     }
 
     public Response Accept(Request req){
         // your code here
+        if (req.proposal > this.clock) {
+            this.clock = req.clk;
+        }
         Response r;
         Metadata m = this.instances.get(req.seq);
         if (req.proposal >= m.n_p) {
             m.n_p = req.proposal;
             m.n_a = req.proposal;
             m.v_a = req.value;
-            this.instances.put(req.seq, m);
-            r = new Response(true, m.n_a, m.v_a);
+            r = new Response(true, m.n_a, m.v_a, this.clock);
         }
         else {
-            r = new Response(false, m.n_a, m.v_a);
+            r = new Response(false, m.n_a, m.v_a, this.clock);
         }
         return r;
     }
 
     public Response Decide(Request req){
         // your code here
+        if (req.proposal > this.clock) {
+            this.clock = req.clk;
+        }
         Metadata m = this.instances.get(req.seq);
         m.status = new retStatus(State.Decided, req.value);
         this.instances.put(req.seq, m);
-        return null;
+        return new Response(true, m.n_a, m.v_a, this.clock);
     }
 
     /**
