@@ -2,8 +2,11 @@ package paxos;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * This class is the main class you need to implement paxos instances.
@@ -21,15 +24,31 @@ public class Paxos implements PaxosRMI, Runnable{
     AtomicBoolean dead;// for testing
     AtomicBoolean unreliable;// for testing
 
-    // Your data here
-    Integer n_p; //highest prepare seen
-    String n_a;  //highest accept seen (key)
-    Integer v_a; //highest accept seen (value)
-    State s;
+    // max and min
+    int maxSeq;
+    int minSeq;
+    int clock;
 
-    // to be read by created thread
-    int seq;
-    Object value; 
+    retStatus status;
+
+    public class Metadata {
+        Object value;
+        retStatus status;
+        Integer n_p; //highest prepare seen
+        Integer n_a;  //highest accept seen (proposal)
+        Object v_a; //highest accept seen (value)
+
+        public Metadata(Object value) {
+            this.value = value;
+            this.status = new retStatus(State.Pending, value);
+            this.n_p = -1;
+            this.n_a = -1;
+            this.v_a = null;
+        }
+    }
+
+    Map<Integer, Metadata> instances;
+    ConcurrentLinkedQueue clq;
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -46,10 +65,10 @@ public class Paxos implements PaxosRMI, Runnable{
         this.unreliable = new AtomicBoolean(false);
 
         // Your initialization code here
-        this.n_p = -1;
-        this.n_a = "";
-        this.v_a = -1;
-        this.s = State.Pending;
+        this.maxSeq = -1;
+        this.instances = new HashMap<Integer, Metadata>();
+        this.clq = new ConcurrentLinkedQueue();
+        this.clock = 0;
 
         // register peers, do not modify this part
         try{
@@ -117,21 +136,86 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public void Start(int seq, Object value){
         // Your code here
-        this.seq = seq;
-        this.value = value;
+        if (seq > Max()) {
+            this.maxSeq = seq;
+        }
 
-        // Runnable newRunnable = new Paxos();
-        Thread t = new Thread(this);
-        t.start();
+        if (seq >= Min()) {
+            this.instances.put(seq, new Metadata(value));
+            clq.add(seq);
+            this.status = new retStatus(State.Pending, value);
+
+            // Runnable newRunnable = new Paxos();
+            Thread t = new Thread(this);
+            t.start();
+        }
     }
 
     @Override
     public void run(){
         //Your code here
-        while(this.s != State.Decided){
-            Integer n = n_p + 1;
-            for(String server : peers) {
-                Call("Prepare", )
+        int seq = (int) clq.poll();
+        int proposal = -1;
+        mutex.lock();
+        try {
+            proposal = this.clock + 1;
+            clock++;
+        } finally {
+            mutex.unlock();
+        }
+        while (this.instances.get(seq).status.state != State.Decided) {
+            Object value = this.instances.get(seq).value;
+            Request req = new Request(proposal, value, seq);
+            int count = 0;
+            int max_proposal = proposal;
+            Object max_value = value;
+            for (int i = 0; i < peers.length; i++) {
+                Response res;
+                if (i != me){
+                    res = Call("Prepare", req, i);
+                }
+                else {
+                    res = Prepare(req);     
+                }
+                if (res != null) {
+                    if (res.ok) {
+                        count++;        
+                    }
+                    if (res.n_a > max_proposal) {
+                        max_proposal = res.n_a;
+                        max_value = res.v_a;                    
+                    }
+                }
+            }
+            if (count > ports.length / 2) {
+                req = new Request(proposal, max_value, seq);
+                count = 0;
+                for (int i = 0; i < peers.length; i++) {
+                    Response res;
+                    if (i != me){
+                        res = Call("Accept", req, i);
+                    }
+                    else {
+                        res = Accept(req);
+                    }
+                    if (res != null) {
+                        if (res.ok) {
+                            count++;        
+                        }
+                    }
+                }
+                
+                if (count > ports.length / 2) {
+                    for (int i = 0; i < peers.length; i++) {
+                        Response res;
+                        if (i != me){
+                            res = Call("Decide", req, i);
+                        }
+                        else {
+                            res = Decide(req);
+                        }
+                    }
+                }
             }
         }
     }
@@ -139,17 +223,42 @@ public class Paxos implements PaxosRMI, Runnable{
     // RMI handler
     public Response Prepare(Request req){
         // your code here
-
+        Response r;
+        Metadata m = this.instances.get(req.seq);
+        if (req.proposal > m.n_p) {
+            m.n_p = req.proposal;
+            this.instances.put(req.seq, m);
+            r = new Response(true, m.n_a, m.v_a);
+        }
+        else {
+            r = new Response(false, m.n_a, m.v_a);
+        }
+        return r;
     }
 
     public Response Accept(Request req){
         // your code here
-
+        Response r;
+        Metadata m = this.instances.get(req.seq);
+        if (req.proposal >= m.n_p) {
+            m.n_p = req.proposal;
+            m.n_a = req.proposal;
+            m.v_a = req.value;
+            this.instances.put(req.seq, m);
+            r = new Response(true, m.n_a, m.v_a);
+        }
+        else {
+            r = new Response(false, m.n_a, m.v_a);
+        }
+        return r;
     }
 
     public Response Decide(Request req){
         // your code here
-
+        Metadata m = this.instances.get(req.seq);
+        m.status = new retStatus(State.Decided, req.value);
+        this.instances.put(req.seq, m);
+        return null;
     }
 
     /**
@@ -170,6 +279,7 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public int Max(){
         // Your code here
+        return this.maxSeq;
     }
 
     /**
@@ -202,7 +312,7 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public int Min(){
         // Your code here
-
+        return -1;
     }
 
 
@@ -216,7 +326,11 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public retStatus Status(int seq){
         // Your code here
-
+        Metadata m = this.instances.get(seq);
+        if (m != null) {
+            return m.status;
+        }
+        return new retStatus(State.Pending, null);
     }
 
     /**

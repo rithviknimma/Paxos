@@ -1,6 +1,7 @@
 package kvpaxos;
 import paxos.Paxos;
 import paxos.State;
+import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 // You are allowed to call Paxos.Status to check if agreement was made.
 
 import java.rmi.registry.LocateRegistry;
@@ -46,11 +47,13 @@ public class Server implements KVPaxosRMI {
     // RMI handlers
     public Response Get(Request req){
         // Your code here
+        throw new NotImplementedException();
 
     }
 
     public Response Put(Request req){
         // Your code here
+        throw new NotImplementedException();
 
     }
 

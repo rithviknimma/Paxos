@@ -1,5 +1,7 @@
 package kvpaxos;
 
+import sun.reflect.generics.reflectiveObjects.NotImplementedException;
+
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 
@@ -51,11 +53,12 @@ public class Client {
     // RMI handlers
     public Integer Get(String key){
         // Your code here
-
+        throw new NotImplementedException();
     }
 
     public boolean Put(String key, Integer value){
         // Your code here
+        throw new NotImplementedException();
     }
 
 }
