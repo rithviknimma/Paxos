@@ -2,8 +2,7 @@ package paxos;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -25,8 +24,7 @@ public class Paxos implements PaxosRMI, Runnable{
     AtomicBoolean unreliable;// for testing
 
     // max and min
-    int maxSeq;
-    int minSeq;
+    int[] highDone;
     int clock;
 
     public class Metadata {
@@ -45,7 +43,7 @@ public class Paxos implements PaxosRMI, Runnable{
         }
     }
 
-    Map<Integer, Metadata> instances;
+    TreeMap<Integer, Metadata> instances;
     ConcurrentLinkedQueue clq;
 
     /**
@@ -63,10 +61,14 @@ public class Paxos implements PaxosRMI, Runnable{
         this.unreliable = new AtomicBoolean(false);
 
         // Your initialization code here
-        this.maxSeq = -1;
-        this.instances = new HashMap<Integer, Metadata>();
+        this.instances = new TreeMap<Integer, Metadata>();
         this.clq = new ConcurrentLinkedQueue();
         this.clock = 0;
+        this.highDone = new int[peers.length];
+
+        for (int i = 0; i < this.highDone.length; i++) {
+            this.highDone[i] = -1;
+        }
 
         // register peers, do not modify this part
         try{
@@ -134,10 +136,6 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public void Start(int seq, Object value){
         // Your code here
-        if (seq > Max()) {
-            this.maxSeq = seq;
-        }
-
         if (seq >= Min()) {
             this.instances.put(seq, new Metadata(value));
             clq.add(seq);
@@ -153,16 +151,11 @@ public class Paxos implements PaxosRMI, Runnable{
         //Your code here
         int seq = (int) clq.poll();
         int proposal = -1;
-        mutex.lock();
-        try {
-            proposal = this.clock + 1;
-            this.clock++;
-        } finally {
-            mutex.unlock();
-        }
         while (this.instances.get(seq).status.state != State.Decided) {
+            this.clock++;
+            proposal = this.clock;
             Object value = this.instances.get(seq).value;
-            Request req = new Request(proposal, value, seq, this.clock);
+            Request req = new Request(proposal, value, seq, this.clock, this.highDone[this.me], this.me);
             int count = 0;
             int max_proposal = proposal;
             Object max_value = value;
@@ -185,10 +178,13 @@ public class Paxos implements PaxosRMI, Runnable{
                     if (res.clk > this.clock) {
                         this.clock = res.clk;
                     }
+                    if (res.highestD > this.highDone[i]) {
+                        this.highDone[i] = res.highestD;
+                    }
                 }
             }
             if (count > ports.length / 2) {
-                req = new Request(proposal, max_value, seq, this.clock);
+                req = new Request(proposal, max_value, seq, this.clock, this.highDone[me], this.me);
                 count = 0;
                 for (int i = 0; i < peers.length; i++) {
                     Response res;
@@ -204,6 +200,9 @@ public class Paxos implements PaxosRMI, Runnable{
                         }
                         if (res.clk > this.clock) {
                             this.clock = res.clk;
+                        }
+                        if (res.highestD > this.highDone[i]) {
+                            this.highDone[i] = res.highestD;
                         }
                     }
                 }
@@ -234,6 +233,9 @@ public class Paxos implements PaxosRMI, Runnable{
         if (req.proposal > this.clock) {
             this.clock = req.clk;
         }
+        if (req.highestD > this.highDone[req.id]) {
+            this.highDone[req.id] = req.highestD;
+        }
         Response r;
         Metadata m = this.instances.get(req.seq);
         if (m == null) {
@@ -242,10 +244,10 @@ public class Paxos implements PaxosRMI, Runnable{
         }
         if (req.proposal > m.n_p) {
             m.n_p = req.proposal;
-            r = new Response(true, m.n_a, m.v_a, this.clock);
+            r = new Response(true, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
         }
         else {
-            r = new Response(false, m.n_a, m.v_a, this.clock);
+            r = new Response(false, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
         }
         return r;
     }
@@ -255,16 +257,23 @@ public class Paxos implements PaxosRMI, Runnable{
         if (req.proposal > this.clock) {
             this.clock = req.clk;
         }
+        if (req.highestD > this.highDone[req.id]) {
+            this.highDone[req.id] = req.highestD;
+        }
         Response r;
         Metadata m = this.instances.get(req.seq);
+        if (m == null) {
+            m = new Metadata(req.value);
+            this.instances.put(req.seq, m);
+        }
         if (req.proposal >= m.n_p) {
             m.n_p = req.proposal;
             m.n_a = req.proposal;
             m.v_a = req.value;
-            r = new Response(true, m.n_a, m.v_a, this.clock);
+            r = new Response(true, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
         }
         else {
-            r = new Response(false, m.n_a, m.v_a, this.clock);
+            r = new Response(false, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
         }
         return r;
     }
@@ -274,10 +283,18 @@ public class Paxos implements PaxosRMI, Runnable{
         if (req.proposal > this.clock) {
             this.clock = req.clk;
         }
+        if (req.highestD > this.highDone[req.id]) {
+            this.highDone[req.id] = req.highestD;
+        }
         Metadata m = this.instances.get(req.seq);
+        if (m == null) {
+            m = new Metadata(req.value);
+            this.instances.put(req.seq, m);
+        }
         m.status = new retStatus(State.Decided, req.value);
+        m.n_a = Integer.MAX_VALUE;
         this.instances.put(req.seq, m);
-        return new Response(true, m.n_a, m.v_a, this.clock);
+        return new Response(true, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
     }
 
     /**
@@ -288,6 +305,7 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public void Done(int seq) {
         // Your code here
+        this.highDone[this.me] = Math.max(seq, this.highDone[this.me]);
     }
 
 
@@ -298,7 +316,7 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public int Max(){
         // Your code here
-        return this.maxSeq;
+        return this.instances.lastKey();
     }
 
     /**
@@ -331,7 +349,13 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public int Min(){
         // Your code here
-        return -1;
+        int min = this.highDone[0];
+        for (int i = 0; i < this.highDone.length; i++) {
+            if (this.highDone[i] < min) {
+                min = this.highDone[i];
+            }
+        }
+        return min+1;
     }
 
 
@@ -345,6 +369,9 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public retStatus Status(int seq){
         // Your code here
+        if (seq <= this.highDone[this.me]) {
+            return new retStatus(State.Forgotten, null);
+        }
         Metadata m = this.instances.get(seq);
         if (m != null) {
             return m.status;
@@ -392,6 +419,4 @@ public class Paxos implements PaxosRMI, Runnable{
     public boolean isunreliable(){
         return this.unreliable.get();
     }
-
-
 }

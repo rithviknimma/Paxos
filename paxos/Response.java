@@ -14,12 +14,14 @@ public class Response implements Serializable {
     int n_a;
     Object v_a;
     int clk;
+    int highestD;
 
     // Your constructor and methods here
-    public Response(boolean ok, int n_a, Object v_a, int clk) {
+    public Response(boolean ok, int n_a, Object v_a, int clk, int highestD) {
         this.ok = ok;
         this.n_a = n_a;
         this.v_a = v_a;
         this.clk = clk;
+        this.highestD = highestD;
     }
 }
