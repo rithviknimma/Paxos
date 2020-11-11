@@ -2,7 +2,8 @@ package paxos;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
-import java.util.TreeMap;
+import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -25,27 +26,31 @@ public class Paxos implements PaxosRMI, Runnable{
 
     // max and min
     int[] highDone;
-    int clock;
+    TreeMap<Integer, Metadata> instances;
+    ArrayBlockingQueue<Integer> abq;
 
     public class Metadata {
         Object value;
-        retStatus status;
+        State state;
         Integer n_p; //highest prepare seen
         Integer n_a;  //highest accept seen (proposal)
-        Object v_a; //highest accept seen (value)
+        int clock;
 
-        public Metadata(Object value) {
+        public Metadata(Object value, State state) {
             this.value = value;
-            this.status = new retStatus(State.Pending, value);
+            this.state = state;
             this.n_p = -1;
             this.n_a = -1;
-            this.v_a = null;
+            this.clock = 0;
         }
     }
 
+<<<<<<< Updated upstream
     TreeMap<Integer, Metadata> instances;
     ConcurrentLinkedQueue<Integer> clq;
 
+=======
+>>>>>>> Stashed changes
     /**
      * Call the constructor to create a Paxos peer.
      * The hostnames of all the Paxos peers (including this one)
@@ -62,8 +67,12 @@ public class Paxos implements PaxosRMI, Runnable{
 
         // Your initialization code here
         this.instances = new TreeMap<Integer, Metadata>();
+<<<<<<< Updated upstream
         this.clq = new ConcurrentLinkedQueue<Integer>();
         this.clock = 0;
+=======
+        this.abq = new ArrayBlockingQueue<>(peers.length);
+>>>>>>> Stashed changes
         this.highDone = new int[peers.length];
 
         for (int i = 0; i < this.highDone.length; i++) {
@@ -136,11 +145,10 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public void Start(int seq, Object value){
         // Your code here
-        if (seq >= Min()) {
-            this.instances.put(seq, new Metadata(value));
-            clq.add(seq);
+        if (seq > this.highDone[this.me]) {
+            this.instances.put(seq, new Metadata(value, State.Pending));
+            abq.add(seq);
 
-            // Runnable newRunnable = new Paxos();
             Thread t = new Thread(this);
             t.start();
         }
@@ -149,16 +157,16 @@ public class Paxos implements PaxosRMI, Runnable{
     @Override
     public void run(){
         //Your code here
-        int seq = (int) clq.poll();
-        int proposal = -1;
-        while (this.instances.get(seq).status.state != State.Decided) {
-            this.clock++;
-            proposal = this.clock;
-            Object value = this.instances.get(seq).value;
-            Request req = new Request(proposal, value, seq, this.clock, this.highDone[this.me], this.me);
+        Integer seq = abq.poll();
+        Metadata m = this.instances.get(seq);
+        int proposal = m.clock;
+        while (this.instances.get(seq).state != State.Decided) {
+            proposal++;
+            this.instances.put(seq, m);
+            Request req = new Request(proposal, m.value, seq, this.highDone[this.me], this.me);
             int count = 0;
             int max_proposal = proposal;
-            Object max_value = value;
+            Object max_value = m.value;
             for (int i = 0; i < peers.length; i++) {
                 Response res;
                 if (i != me){
@@ -168,23 +176,29 @@ public class Paxos implements PaxosRMI, Runnable{
                     res = Prepare(req);     
                 }
                 if (res != null) {
-                    if (res.ok) {
-                        count++;
-                        if (res.n_a > max_proposal) {
-                            max_proposal = res.n_a;
-                            max_value = res.v_a;
-                        }
-                    }
-                    if (res.clk > this.clock) {
-                        this.clock = res.clk;
-                    }
+                    m.clock = Math.max(res.proposal, m.clock);
+                    this.instances.put(seq, m);
                     if (res.highestD > this.highDone[i]) {
                         this.highDone[i] = res.highestD;
                     }
+                    if(res.in == State.Decided) {
+                        m.value = res.v_a;
+                        m.state = State.Decided;
+                        m.n_p = res.proposal;
+                        this.instances.put(seq, m);
+                        return;
+                    }
+                    if (res.ok) {
+                        count++;
+                    }
+                    if (res.proposal > max_proposal) {
+                        max_proposal = res.proposal;
+                        max_value = res.v_a;
+                    }
                 }
             }
-            if (count > ports.length / 2) {
-                req = new Request(proposal, max_value, seq, this.clock, this.highDone[me], this.me);
+            if (count > peers.length / 2) {
+                req = new Request(proposal, max_value, seq, this.highDone[me], this.me);
                 count = 0;
                 for (int i = 0; i < peers.length; i++) {
                     Response res;
@@ -195,31 +209,36 @@ public class Paxos implements PaxosRMI, Runnable{
                         res = Accept(req);
                     }
                     if (res != null) {
-                        if (res.ok) {
-                            count++;        
-                        }
-                        if (res.clk > this.clock) {
-                            this.clock = res.clk;
-                        }
                         if (res.highestD > this.highDone[i]) {
                             this.highDone[i] = res.highestD;
                         }
+                        if(res.in == State.Decided) {
+                            m.value = res.v_a;
+                            m.state = State.Decided;
+                            m.n_p = res.proposal;
+                            this.instances.put(seq, m);
+                            return;
+                        }
+                        if (res.ok) {
+                            count++;        
+                        }
+                        m.clock = Math.max(res.proposal, m.clock);
+                        this.instances.put(seq, m);
                     }
                 }
                 
-                if (count > ports.length / 2) {
+                if (count > peers.length / 2) {
+                    req = new Request(proposal, max_value, seq, this.highDone[me], this.me);
                     for (int i = 0; i < peers.length; i++) {
                         Response res;
-                        if (i != me){
+                        if (i != me) {
                             res = Call("Decide", req, i);
-                        }
-                        else {
+                        } else {
                             res = Decide(req);
                         }
                         if (res != null) {
-                            if (res.clk > this.clock) {
-                                this.clock = res.clk;
-                            }
+                            m.clock = Math.max(res.proposal, m.clock);
+                            this.instances.put(seq, m);
                         }
                     }
                 }
@@ -230,71 +249,84 @@ public class Paxos implements PaxosRMI, Runnable{
     // RMI handler
     public Response Prepare(Request req){
         // your code here
-        if (req.proposal > this.clock) {
-            this.clock = req.clk;
-        }
         if (req.highestD > this.highDone[req.id]) {
             this.highDone[req.id] = req.highestD;
         }
         Response r;
         Metadata m = this.instances.get(req.seq);
         if (m == null) {
-            m = new Metadata(req.value);
+            m = new Metadata(req.value, State.Pending);
+            m.n_p = req.proposal;
+            m.clock = req.proposal + 1;
             this.instances.put(req.seq, m);
+            return new Response(true, m.n_p, req.value, this.highDone[this.me], State.Pending);
+        }
+        if (m.state == State.Decided) {
+            return new Response(true, m.n_p, m.value, this.highDone[this.me], State.Decided);
         }
         if (req.proposal > m.n_p) {
             m.n_p = req.proposal;
-            r = new Response(true, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
+            r = new Response(true, m.n_a, m.value, this.highDone[this.me], m.state);
         }
         else {
-            r = new Response(false, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
+            r = new Response(false, m.clock, m.value, this.highDone[this.me], m.state);
         }
+        this.instances.put(req.seq, m);
         return r;
     }
 
     public Response Accept(Request req){
         // your code here
-        if (req.proposal > this.clock) {
-            this.clock = req.clk;
-        }
         if (req.highestD > this.highDone[req.id]) {
             this.highDone[req.id] = req.highestD;
         }
         Response r;
         Metadata m = this.instances.get(req.seq);
         if (m == null) {
-            m = new Metadata(req.value);
+            m = new Metadata(req.value, State.Pending);
+            m.n_p = req.proposal;
+            m.clock = req.proposal + 1;
+            m.n_a = req.proposal;
             this.instances.put(req.seq, m);
+            return new Response(true, m.n_a, req.value, this.highDone[this.me], State.Pending);
+        }
+        if (req.proposal > m.n_p) {
+            m.n_p = req.proposal;
         }
         if (req.proposal >= m.n_p) {
             m.n_p = req.proposal;
             m.n_a = req.proposal;
-            m.v_a = req.value;
-            r = new Response(true, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
+            m.value = req.value;
+            r = new Response(true, m.n_a, m.value, this.highDone[this.me], m.state);
         }
         else {
-            r = new Response(false, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
+            r = new Response(false, m.n_a, m.value, this.highDone[this.me], m.state);
         }
+        this.instances.put(req.seq, m);
         return r;
     }
 
     public Response Decide(Request req){
         // your code here
-        if (req.proposal > this.clock) {
-            this.clock = req.clk;
-        }
         if (req.highestD > this.highDone[req.id]) {
             this.highDone[req.id] = req.highestD;
         }
         Metadata m = this.instances.get(req.seq);
         if (m == null) {
-            m = new Metadata(req.value);
+            m = new Metadata(req.value, State.Decided);
+            m.n_p = Integer.MAX_VALUE;
+            m.clock = req.proposal + 1;
             this.instances.put(req.seq, m);
+            return new Response(true, m.n_p, req.value, this.highDone[this.me], m.state);
         }
-        m.status = new retStatus(State.Decided, req.value);
-        m.n_a = Integer.MAX_VALUE;
+        if (req.proposal > m.n_p) {
+            m.n_p = req.proposal;
+        }
+        m.value = req.value;
+        m.state = State.Decided;
+        m.n_p = Integer.MAX_VALUE;
         this.instances.put(req.seq, m);
-        return new Response(true, m.n_a, m.v_a, this.clock, this.highDone[this.me]);
+        return new Response(true, m.n_p, m.value, this.highDone[this.me], m.state);
     }
 
     /**
@@ -355,6 +387,15 @@ public class Paxos implements PaxosRMI, Runnable{
                 min = this.highDone[i];
             }
         }
+        List<Integer> seqs = new ArrayList<Integer>();
+        for (int seq : this.instances.keySet()) {
+            if (seq <= min) {
+                seqs.add(seq);
+            }
+        }
+        for (int seq : seqs) {
+            this.instances.remove(seq);
+        }
         return min+1;
     }
 
@@ -374,7 +415,7 @@ public class Paxos implements PaxosRMI, Runnable{
         }
         Metadata m = this.instances.get(seq);
         if (m != null) {
-            return m.status;
+            return new retStatus(m.state, m.value);
         }
         return new retStatus(State.Pending, null);
     }

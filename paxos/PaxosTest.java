@@ -230,5 +230,13 @@ public class PaxosTest {
 
     }
 
+    @Test
+    public void TestMany() throws InterruptedException {
+        for (int i = 0; i < 100; i++) {
+            TestBasic();
+            System.out.println("Passed " + (i+1));
+        }
+    }
+
 
 }

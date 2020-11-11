@@ -11,17 +11,17 @@ public class Response implements Serializable {
     // your data here
  
     boolean ok;
-    int n_a;
+    int proposal;
     Object v_a;
-    int clk;
     int highestD;
+    State in;
 
     // Your constructor and methods here
-    public Response(boolean ok, int n_a, Object v_a, int clk, int highestD) {
+    public Response(boolean ok, int proposal, Object v_a, int highestD, State in) {
         this.ok = ok;
-        this.n_a = n_a;
+        this.proposal = proposal;
         this.v_a = v_a;
-        this.clk = clk;
         this.highestD = highestD;
+        this.in = in;
     }
 }
