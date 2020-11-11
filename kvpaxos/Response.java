@@ -8,8 +8,12 @@ import java.io.Serializable;
  */
 public class Response implements Serializable {
     static final long serialVersionUID=22L;
-    // your data here
+    // Your data here
+    Op data;
 
 
     // Your constructor and methods here
+    public Response(Op data) {
+    	this.data = data;
+    }
 }

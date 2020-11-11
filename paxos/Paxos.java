@@ -44,7 +44,7 @@ public class Paxos implements PaxosRMI, Runnable{
     }
 
     TreeMap<Integer, Metadata> instances;
-    ConcurrentLinkedQueue clq;
+    ConcurrentLinkedQueue<Integer> clq;
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -62,7 +62,7 @@ public class Paxos implements PaxosRMI, Runnable{
 
         // Your initialization code here
         this.instances = new TreeMap<Integer, Metadata>();
-        this.clq = new ConcurrentLinkedQueue();
+        this.clq = new ConcurrentLinkedQueue<Integer>();
         this.clock = 0;
         this.highDone = new int[peers.length];
 

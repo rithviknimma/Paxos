@@ -1,7 +1,5 @@
 package kvpaxos;
 
-import sun.reflect.generics.reflectiveObjects.NotImplementedException;
-
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 
@@ -11,12 +9,14 @@ public class Client {
     int[] ports;
 
     // Your data here
+    int seq;
 
 
     public Client(String[] servers, int[] ports){
         this.servers = servers;
         this.ports = ports;
         // Your initialization code here
+        seq = 0;
     }
 
     /**
@@ -53,12 +53,36 @@ public class Client {
     // RMI handlers
     public Integer Get(String key){
         // Your code here
-        throw new NotImplementedException();
+    	for(int i = 0; i < ports.length; i++) {
+    		Op data = new Op("Get", seq, key, null);
+    		Request req = new Request(data);
+    		Response res = Call("Get", req, i);
+    		if(res != null) {
+    			if(seq < res.data.ClientSeq)
+    				seq = res.data.ClientSeq + 1;
+    			else
+    				seq = seq + 1;
+    			return res.data.value;
+    		}
+    	}
+    	return null;
     }
 
     public boolean Put(String key, Integer value){
         // Your code here
-        throw new NotImplementedException();
+    	for(int i = 0; i < ports.length; i++) {
+    		Op data = new Op("Put", seq, key, value);
+    		Request req = new Request(data);
+    		Response res = Call("Put", req, i);
+    		if(res != null) {
+    			if(seq < res.data.ClientSeq)
+    				seq = res.data.ClientSeq + 1;
+    			else
+    				seq = seq + 1;
+    			return true;
+    		}
+    	}
+    	return false;
     }
 
 }
