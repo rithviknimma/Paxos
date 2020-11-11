@@ -45,12 +45,6 @@ public class Paxos implements PaxosRMI, Runnable{
         }
     }
 
-<<<<<<< Updated upstream
-    TreeMap<Integer, Metadata> instances;
-    ConcurrentLinkedQueue<Integer> clq;
-
-=======
->>>>>>> Stashed changes
     /**
      * Call the constructor to create a Paxos peer.
      * The hostnames of all the Paxos peers (including this one)
@@ -67,12 +61,7 @@ public class Paxos implements PaxosRMI, Runnable{
 
         // Your initialization code here
         this.instances = new TreeMap<Integer, Metadata>();
-<<<<<<< Updated upstream
-        this.clq = new ConcurrentLinkedQueue<Integer>();
-        this.clock = 0;
-=======
         this.abq = new ArrayBlockingQueue<>(peers.length);
->>>>>>> Stashed changes
         this.highDone = new int[peers.length];
 
         for (int i = 0; i < this.highDone.length; i++) {
