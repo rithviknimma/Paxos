@@ -3,7 +3,6 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -27,7 +26,7 @@ public class Paxos implements PaxosRMI, Runnable{
     // max and min
     int[] highDone;
     TreeMap<Integer, Metadata> instances;
-    ArrayBlockingQueue<Integer> abq;
+    ConcurrentLinkedQueue<Integer> abq;
 
     public class Metadata {
         Object value;
@@ -61,7 +60,7 @@ public class Paxos implements PaxosRMI, Runnable{
 
         // Your initialization code here
         this.instances = new TreeMap<Integer, Metadata>();
-        this.abq = new ArrayBlockingQueue<>(peers.length);
+        this.abq = new ConcurrentLinkedQueue<Integer>();
         this.highDone = new int[peers.length];
 
         for (int i = 0; i < this.highDone.length; i++) {
@@ -148,10 +147,8 @@ public class Paxos implements PaxosRMI, Runnable{
         //Your code here
         Integer seq = abq.poll();
         Metadata m = this.instances.get(seq);
-        int proposal = m.clock;
         while (this.instances.get(seq).state != State.Decided) {
-            proposal++;
-            this.instances.put(seq, m);
+            int proposal = m.clock + this.me + 1;
             Request req = new Request(proposal, m.value, seq, this.highDone[this.me], this.me);
             int count = 0;
             int max_proposal = proposal;
@@ -232,6 +229,7 @@ public class Paxos implements PaxosRMI, Runnable{
                     }
                 }
             }
+            m = this.instances.get(seq);
         }
     }
 
@@ -248,17 +246,17 @@ public class Paxos implements PaxosRMI, Runnable{
             m.n_p = req.proposal;
             m.clock = req.proposal + 1;
             this.instances.put(req.seq, m);
-            return new Response(true, m.n_p, req.value, this.highDone[this.me], State.Pending);
+            return new Response(true, m.n_a, m.value, this.highDone[this.me], State.Pending);
         }
         if (m.state == State.Decided) {
-            return new Response(true, m.n_p, m.value, this.highDone[this.me], State.Decided);
+            return new Response(true, m.n_a, m.value, this.highDone[this.me], State.Decided);
         }
         if (req.proposal > m.n_p) {
             m.n_p = req.proposal;
             r = new Response(true, m.n_a, m.value, this.highDone[this.me], m.state);
         }
         else {
-            r = new Response(false, m.clock, m.value, this.highDone[this.me], m.state);
+            r = new Response(false, m.n_a, m.value, this.highDone[this.me], m.state);
         }
         this.instances.put(req.seq, m);
         return r;
